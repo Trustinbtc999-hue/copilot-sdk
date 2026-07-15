@@ -3,18 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	copilot "github.com/github/copilot-sdk/go"
 )
 
 // Demonstrate using an MCP server (filesystem) with the Copilot SDK.
 // The @modelcontextprotocol/server-filesystem package must be available via npx.
+//
+// Set the COPILOT_CLI_PATH environment variable if the Copilot CLI is not in PATH.
 
 func main() {
 	ctx := context.Background()
-	cliPath := filepath.Join("..", "..", "..", "nodejs", "node_modules", "@github", "copilot", "index.js")
-	client := copilot.NewClient(&copilot.ClientOptions{Connection: copilot.StdioConnection{Path: cliPath}})
+	client := copilot.NewClient(nil)
 	if err := client.Start(ctx); err != nil {
 		panic(err)
 	}
@@ -37,9 +37,12 @@ func main() {
 
 	fmt.Printf("Session created: %s\n", session.SessionID)
 
-	reply, _ := session.SendAndWait(ctx, copilot.MessageOptions{
+	reply, err := session.SendAndWait(ctx, copilot.MessageOptions{
 		Prompt: "List the files in the allowed directory",
 	})
+	if err != nil {
+		panic(err)
+	}
 
 	content := ""
 	if reply != nil {
@@ -49,3 +52,4 @@ func main() {
 	}
 	fmt.Printf("Response: %s\n", content)
 }
+
