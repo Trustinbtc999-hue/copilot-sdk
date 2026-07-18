@@ -15,6 +15,7 @@ using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 
@@ -237,6 +238,17 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                     nameof(options));
             }
 
+            if (options.WorkingDirectory is not null)
+            {
+                throw new ArgumentException(
+                    $"{nameof(CopilotClientOptions)}.{nameof(CopilotClientOptions.WorkingDirectory)} is not supported with " +
+                    $"{nameof(RuntimeConnection)}.{nameof(RuntimeConnection.ForInProcess)}(): the in-process transport hosts " +
+                    "the native runtime in the shared host process and spawns the worker without a working-directory " +
+                    "parameter, so a per-client working directory cannot be honored in-process. Use a child-process " +
+                    "transport, or set the process working directory before creating the client.",
+                    nameof(options));
+            }
+
             return;
         }
 
@@ -338,16 +350,49 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
             {
                 if (_connection is InProcessRuntimeConnection)
                 {
-                    // In-process FFI hosting: load the Rust cdylib and let it spawn
-                    // the CLI worker, instead of the SDK launching a CLI child process.
-                    // The worker reads its configuration (telemetry export, etc.) from
-                    // the environment passed here, so apply the same telemetry-derived
-                    // vars the child-process path sets on its startInfo.Environment.
-                    var ffiEnvironment = _options.Environment?.ToDictionary(kvp => kvp.Key, kvp => (string?)kvp.Value)
-                        ?? new Dictionary<string, string?>();
-                    ApplyTelemetryEnvironment(ffiEnvironment, _options.Telemetry);
-                    var resolvedFfiEnvironment = ffiEnvironment.ToDictionary(kvp => kvp.Key, kvp => kvp.Value!);
-                    var ffiHost = FfiRuntimeHost.Create(ResolveCliPathForFfi(), GetNapiPrebuildsFolderOrThrow(), resolvedFfiEnvironment, _logger);
+                    var ffiEnvironment = new Dictionary<string, string>();
+                    if (!string.IsNullOrEmpty(_options.GitHubToken))
+                    {
+                        ffiEnvironment["COPILOT_SDK_AUTH_TOKEN"] = _options.GitHubToken!;
+                    }
+                    if (!string.IsNullOrEmpty(_options.BaseDirectory))
+                    {
+                        ffiEnvironment["COPILOT_HOME"] = _options.BaseDirectory!;
+                    }
+                    if (_options.Mode == CopilotClientMode.Empty)
+                    {
+                        ffiEnvironment["COPILOT_DISABLE_KEYTAR"] = "1";
+                    }
+
+                    var ffiArgs = new List<string>();
+                    if (_options.LogLevel is { } logLevel && !string.IsNullOrEmpty(logLevel.Value))
+                    {
+                        ffiArgs.AddRange(["--log-level", logLevel.Value]);
+                    }
+                    if (!string.IsNullOrEmpty(_options.GitHubToken))
+                    {
+                        ffiArgs.AddRange(["--auth-token-env", "COPILOT_SDK_AUTH_TOKEN"]);
+                    }
+                    var useLoggedInUser = _options.UseLoggedInUser ?? string.IsNullOrEmpty(_options.GitHubToken);
+                    if (!useLoggedInUser)
+                    {
+                        ffiArgs.Add("--no-auto-login");
+                    }
+                    if (_options.SessionIdleTimeoutSeconds is > 0)
+                    {
+                        ffiArgs.AddRange(["--session-idle-timeout", _options.SessionIdleTimeoutSeconds.Value.ToString(CultureInfo.InvariantCulture)]);
+                    }
+                    if (_options.EnableRemoteSessions)
+                    {
+                        ffiArgs.Add("--remote");
+                    }
+
+                    var ffiHost = FfiRuntimeHost.Create(
+                        ResolveCliPathForFfi(),
+                        GetNapiPrebuildsFolderOrThrow(),
+                        ffiEnvironment,
+                        ffiArgs,
+                        _logger);
                     _ffiHost = ffiHost;
                     await ffiHost.StartAsync(ct);
                     connection = await ConnectToServerAsync(null, null, null, null, ct, ffiHost);
@@ -1137,12 +1182,14 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 InstructionDirectories: config.InstructionDirectories,
                 PluginDirectories: config.PluginDirectories,
                 LargeOutput: config.LargeOutput,
+                ToolSearch: config.ToolSearch,
                 Memory: config.Memory,
                 Canvases: config.Canvases,
                 RequestCanvasRenderer: config.RequestCanvasRenderer,
                 RequestExtensions: config.RequestExtensions,
                 ExtensionSdkPath: config.ExtensionSdkPath,
                 ExtensionInfo: config.ExtensionInfo,
+                CanvasProvider: config.CanvasProvider,
                 Providers: config.Providers,
                 Models: config.Models,
                 ToolFilterPrecedence: toolFilter.ToolFilterPrecedence,
@@ -1347,12 +1394,14 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
                 InstructionDirectories: config.InstructionDirectories,
                 PluginDirectories: config.PluginDirectories,
                 LargeOutput: config.LargeOutput,
+                ToolSearch: config.ToolSearch,
                 Memory: config.Memory,
                 Canvases: config.Canvases,
                 RequestCanvasRenderer: config.RequestCanvasRenderer,
                 RequestExtensions: config.RequestExtensions,
                 ExtensionSdkPath: config.ExtensionSdkPath,
                 ExtensionInfo: config.ExtensionInfo,
+                CanvasProvider: config.CanvasProvider,
                 OpenCanvases: config.OpenCanvases,
                 Providers: config.Providers,
                 Models: config.Models,
@@ -2199,7 +2248,12 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     {
         string os;
         if (OperatingSystem.IsWindows()) os = "win";
-        else if (OperatingSystem.IsLinux()) os = "linux";
+        else if (OperatingSystem.IsLinux())
+        {
+            os = RuntimeInformation.RuntimeIdentifier.StartsWith("linux-musl-", StringComparison.Ordinal)
+                ? "linux-musl"
+                : "linux";
+        }
         else if (OperatingSystem.IsMacOS()) os = "osx";
         else return null;
 
@@ -2246,7 +2300,12 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
     {
         string platform;
         if (OperatingSystem.IsWindows()) platform = "win32";
-        else if (OperatingSystem.IsLinux()) platform = "linux";
+        else if (OperatingSystem.IsLinux())
+        {
+            platform = RuntimeInformation.RuntimeIdentifier.StartsWith("linux-musl-", StringComparison.Ordinal)
+                ? "linuxmusl"
+                : "linux";
+        }
         else if (OperatingSystem.IsMacOS()) platform = "darwin";
         else return null;
 
@@ -2687,6 +2746,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         IList<string>? InstructionDirectories = null,
         IList<string>? PluginDirectories = null,
         LargeToolOutputConfig? LargeOutput = null,
+        ToolSearchConfig? ToolSearch = null,
         MemoryConfiguration? Memory = null,
 #pragma warning disable GHCP001
         IList<CanvasDeclaration>? Canvases = null,
@@ -2694,6 +2754,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         bool? RequestExtensions = null,
         string? ExtensionSdkPath = null,
         ExtensionInfo? ExtensionInfo = null,
+        CanvasProviderIdentity? CanvasProvider = null,
         IList<NamedProviderConfig>? Providers = null,
         IList<ProviderModelConfig>? Models = null,
         OptionsUpdateToolFilterPrecedence? ToolFilterPrecedence = null,
@@ -2708,17 +2769,20 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         JsonElement Parameters, /* JSON schema */
         bool? OverridesBuiltInTool = null,
         bool? SkipPermission = null,
-        CopilotToolDefer? Defer = null)
+        CopilotToolDefer? Defer = null,
+        IDictionary<string, JsonNode?>? Metadata = null)
     {
         public static ToolDefinition FromAIFunction(AIFunctionDeclaration function)
         {
             var overrides = function.AdditionalProperties.TryGetValue(CopilotTool.OverridesBuiltInToolKey, out var val) && val is true;
             var skipPerm = function.AdditionalProperties.TryGetValue(CopilotTool.SkipPermissionKey, out var skipVal) && skipVal is true;
             var defer = function.AdditionalProperties.TryGetValue(CopilotTool.DeferKey, out var deferVal) && deferVal is CopilotToolDefer d ? d : (CopilotToolDefer?)null;
+            var metadata = function.AdditionalProperties.TryGetValue(CopilotTool.MetadataKey, out var metaVal) && metaVal is IDictionary<string, JsonNode?> m ? m : null;
             return new ToolDefinition(function.Name, function.Description, function.JsonSchema,
                 overrides ? true : null,
                 skipPerm ? true : null,
-                defer);
+                defer,
+                metadata);
         }
     }
 
@@ -2787,6 +2851,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         IList<string>? InstructionDirectories = null,
         IList<string>? PluginDirectories = null,
         LargeToolOutputConfig? LargeOutput = null,
+        ToolSearchConfig? ToolSearch = null,
         MemoryConfiguration? Memory = null,
 #pragma warning disable GHCP001
         IList<CanvasDeclaration>? Canvases = null,
@@ -2794,6 +2859,7 @@ public sealed partial class CopilotClient : IDisposable, IAsyncDisposable
         bool? RequestExtensions = null,
         string? ExtensionSdkPath = null,
         ExtensionInfo? ExtensionInfo = null,
+        CanvasProviderIdentity? CanvasProvider = null,
         IList<OpenCanvasInstance>? OpenCanvases = null,
         IList<NamedProviderConfig>? Providers = null,
         IList<ProviderModelConfig>? Models = null,

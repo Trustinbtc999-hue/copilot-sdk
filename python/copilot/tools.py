@@ -11,9 +11,12 @@ import inspect
 import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeVar, get_type_hints, overload
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, get_type_hints, overload
 
 from pydantic import BaseModel, ValidationError
+
+if TYPE_CHECKING:
+    from .generated.rpc import CurrentToolMetadata
 
 ToolResultType = Literal["success", "failure", "rejected", "denied", "timeout"]
 
@@ -38,6 +41,7 @@ class ToolResult:
     binary_results_for_llm: list[ToolBinaryResult] | None = None
     session_log: str | None = None
     tool_telemetry: dict[str, Any] | None = None
+    tool_references: list[str] | None = None
     _from_exception: bool = field(default=False, repr=False)
 
 
@@ -49,6 +53,14 @@ class ToolInvocation:
     tool_call_id: str = ""
     tool_name: str = ""
     arguments: Any = None
+    available_tools: list[CurrentToolMetadata] | None = None
+    """Snapshot of the session's currently initialized tools.
+
+    Populated by the SDK only when this invocation targets the built-in
+    tool-search tool (``tool_search_tool``), so a tool-search override can
+    rank/filter the live catalog -- including MCP tools configured in settings --
+    without issuing its own RPC. ``None`` for every other tool invocation.
+    """
 
 
 ToolHandler = Callable[[ToolInvocation], ToolResult | Awaitable[ToolResult]]
@@ -63,6 +75,7 @@ class Tool:
     overrides_built_in_tool: bool = False
     skip_permission: bool = False
     defer: Literal["auto", "never"] | None = None
+    metadata: dict[str, Any] | None = None
 
 
 T = TypeVar("T", bound=BaseModel)
@@ -77,6 +90,7 @@ def define_tool(
     overrides_built_in_tool: bool = False,
     skip_permission: bool = False,
     defer: Literal["auto", "never"] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> Callable[[Callable[..., Any]], Tool]:
     pass
 
@@ -91,6 +105,7 @@ def define_tool(
     overrides_built_in_tool: bool = False,
     skip_permission: bool = False,
     defer: Literal["auto", "never"] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> Tool:
     pass
 
@@ -105,6 +120,7 @@ def define_tool(
     overrides_built_in_tool: bool = False,
     skip_permission: bool = False,
     defer: Literal["auto", "never"] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> Tool:
     pass
 
@@ -118,6 +134,7 @@ def define_tool(
     overrides_built_in_tool: bool = False,
     skip_permission: bool = False,
     defer: Literal["auto", "never"] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> Tool | Callable[[Callable[[Any, ToolInvocation], Any]], Tool]:
     """
     Define a tool with automatic JSON schema generation from Pydantic models.
@@ -166,6 +183,10 @@ def define_tool(
                     rather than always pre-loaded. When "auto", the tool can be deferred
                     and surfaced through tool search. When "never", the tool is always
                     pre-loaded. Optional; defaults to "auto".
+        metadata: Opaque, host-defined metadata associated with the tool definition.
+                    Keys are namespaced and not part of the stable public API; values
+                    are not interpreted and may be recognized to inform host-specific
+                    behavior. Unknown keys are preserved.
 
     Returns:
         A Tool instance
@@ -260,6 +281,7 @@ def define_tool(
             overrides_built_in_tool=overrides_built_in_tool,
             skip_permission=skip_permission,
             defer=defer,
+            metadata=metadata,
         )
 
     # If handler is provided, call decorator immediately
@@ -279,6 +301,7 @@ def define_tool(
             overrides_built_in_tool=overrides_built_in_tool,
             skip_permission=skip_permission,
             defer=defer,
+            metadata=metadata,
         )
 
     # Otherwise return decorator for @define_tool(...) usage

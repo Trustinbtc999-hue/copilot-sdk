@@ -20,13 +20,13 @@ public sealed class E2ETestContext : IAsyncDisposable
     /// <summary>Optional logger injected by tests; applied to all clients created via <see cref="CreateClient"/>.</summary>
     public ILogger? Logger { get; set; }
 
-    private readonly CapiProxy _proxy;
+    private readonly ReplayProxy _proxy;
     private readonly string _repoRoot;
     private readonly object _clientsLock = new();
     private readonly List<CopilotClient> _persistentClients = [];
     private readonly List<CopilotClient> _transientClients = [];
 
-    private E2ETestContext(string homeDir, string workDir, string proxyUrl, CapiProxy proxy, string repoRoot)
+    private E2ETestContext(string homeDir, string workDir, string proxyUrl, ReplayProxy proxy, string repoRoot)
     {
         HomeDir = homeDir;
         WorkDir = workDir;
@@ -50,7 +50,7 @@ public sealed class E2ETestContext : IAsyncDisposable
         homeDir = ResolveSymlinks(homeDir);
         workDir = ResolveSymlinks(workDir);
 
-        var proxy = new CapiProxy();
+        var proxy = new ReplayProxy();
         var proxyUrl = await proxy.StartAsync();
         await proxy.SetCopilotUserByTokenAsync(DefaultGitHubToken, new CopilotUserConfig(
             Login: "e2e-test-user",
@@ -163,7 +163,10 @@ public sealed class E2ETestContext : IAsyncDisposable
         // to avoid case collisions on case-insensitive filesystems (macOS/Windows)
         var sanitizedName = Regex.Replace(testName!, @"[^a-zA-Z0-9]", "_").ToLowerInvariant();
         var snapshotPath = Path.Combine(_repoRoot, "test", "snapshots", testFile, $"{sanitizedName}.yaml");
-        await _proxy.ConfigureAsync(snapshotPath, WorkDir);
+        await _proxy.ConfigureAsync(
+            snapshotPath,
+            WorkDir,
+            E2ETestBackendConfiguration.Current.ToWireName());
     }
 
     public Task<List<ParsedHttpExchange>> GetExchangesAsync()
@@ -244,8 +247,16 @@ public sealed class E2ETestContext : IAsyncDisposable
     {
         options ??= new CopilotClientOptions();
 
-        options.WorkingDirectory ??= WorkDir;
         options.Logger ??= Logger;
+
+        // Resolve the working directory the worker should run in. Child-process and
+        // URI transports take it as a per-client option; the in-process transport
+        // rejects a per-client WorkingDirectory (the native host spawns the worker
+        // without a cwd parameter), so — mirroring the Node/Rust harnesses — we point
+        // THIS process's cwd at the desired directory before the worker spawns and
+        // clear the per-client option. InProcessEnvIsolationAttribute.After restores
+        // the cwd after the test.
+        var desiredWorkingDirectory = options.WorkingDirectory ?? WorkDir;
 
         // Tests must supply environment via the 'environment' parameter, which the
         // harness routes to the right place per transport (the connection for
@@ -300,12 +311,24 @@ public sealed class E2ETestContext : IAsyncDisposable
             {
                 InProcessEnvIsolation.Apply(name, value);
             }
+
+            // A per-client WorkingDirectory is rejected in-process; instead point this
+            // process's cwd at the desired directory so the worker inherits it at spawn
+            // (restored after the test by InProcessEnvIsolationAttribute).
+            options.WorkingDirectory = null;
+            InProcessEnvIsolation.SetWorkingDirectory(desiredWorkingDirectory);
         }
         else if (options.Connection is ChildProcessRuntimeConnection child)
         {
             // Child-process transport: hand the environment to the spawned child
             // via the connection, where per-client environment is coherent.
             child.Environment = env;
+            options.WorkingDirectory = desiredWorkingDirectory;
+        }
+        else
+        {
+            // URI / existing-runtime transport: per-client WorkingDirectory applies normally.
+            options.WorkingDirectory = desiredWorkingDirectory;
         }
 
         // Auto-inject auth token unless connecting to an existing runtime via URI.
@@ -330,6 +353,25 @@ public sealed class E2ETestContext : IAsyncDisposable
             }
         }
         return client;
+    }
+
+    public Task<CopilotSession> CreateSessionAsync(
+        CopilotClient client,
+        SessionConfig? config = null)
+    {
+        config ??= new SessionConfig();
+        E2ETestBackendConfiguration.Current.ApplyProvider(config, ProxyUrl);
+        return client.CreateSessionAsync(config);
+    }
+
+    public Task<CopilotSession> ResumeSessionAsync(
+        CopilotClient client,
+        string sessionId,
+        ResumeSessionConfig? config = null)
+    {
+        config ??= new ResumeSessionConfig();
+        E2ETestBackendConfiguration.Current.ApplyProvider(config, ProxyUrl);
+        return client.ResumeSessionAsync(sessionId, config);
     }
 
     public void UntrackClient(CopilotClient client)

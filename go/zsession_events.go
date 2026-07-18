@@ -19,6 +19,7 @@ type (
 	AssistantMessageToolRequestType                                = rpc.AssistantMessageToolRequestType
 	AssistantReasoningData                                         = rpc.AssistantReasoningData
 	AssistantReasoningDeltaData                                    = rpc.AssistantReasoningDeltaData
+	AssistantServerToolProgressData                                = rpc.AssistantServerToolProgressData
 	AssistantStreamingDeltaData                                    = rpc.AssistantStreamingDeltaData
 	AssistantToolCallDeltaData                                     = rpc.AssistantToolCallDeltaData
 	AssistantTurnEndData                                           = rpc.AssistantTurnEndData
@@ -52,6 +53,7 @@ type (
 	AttachmentSelectionDetailsStart                                = rpc.AttachmentSelectionDetailsStart
 	AttachmentType                                                 = rpc.AttachmentType
 	AutoApprovalRecommendation                                     = rpc.AutoApprovalRecommendation
+	AutoModeResolvedReasoningBucket                                = rpc.AutoModeResolvedReasoningBucket
 	AutoModeSwitchCompletedData                                    = rpc.AutoModeSwitchCompletedData
 	AutoModeSwitchRequestedData                                    = rpc.AutoModeSwitchRequestedData
 	AutoModeSwitchResponse                                         = rpc.AutoModeSwitchResponse
@@ -103,10 +105,12 @@ type (
 	GitHubRepoRef                                                  = rpc.GitHubRepoRef
 	HandoffRepository                                              = rpc.HandoffRepository
 	HandoffSourceType                                              = rpc.HandoffSourceType
+	HeaderEntry                                                    = rpc.HeaderEntry
 	HookEndData                                                    = rpc.HookEndData
 	HookEndError                                                   = rpc.HookEndError
 	HookProgressData                                               = rpc.HookProgressData
 	HookStartData                                                  = rpc.HookStartData
+	ManagedSettingsResolvedSource                                  = rpc.ManagedSettingsResolvedSource
 	MCPAppToolCallCompleteData                                     = rpc.MCPAppToolCallCompleteData
 	MCPAppToolCallCompleteError                                    = rpc.MCPAppToolCallCompleteError
 	MCPAppToolCallCompleteToolMeta                                 = rpc.MCPAppToolCallCompleteToolMeta
@@ -117,15 +121,19 @@ type (
 	MCPHeadersRefreshRequiredReason                                = rpc.MCPHeadersRefreshRequiredReason
 	MCPOauthCompletedData                                          = rpc.MCPOauthCompletedData
 	MCPOauthCompletionOutcome                                      = rpc.MCPOauthCompletionOutcome
+	MCPOauthHTTPResponse                                           = rpc.MCPOauthHTTPResponse
 	MCPOauthRequestReason                                          = rpc.MCPOauthRequestReason
 	MCPOauthRequiredData                                           = rpc.MCPOauthRequiredData
 	MCPOauthRequiredStaticClientConfig                             = rpc.MCPOauthRequiredStaticClientConfig
 	MCPOauthRequiredStaticClientConfigGrantType                    = rpc.MCPOauthRequiredStaticClientConfigGrantType
 	MCPOauthWwwAuthenticateParams                                  = rpc.MCPOauthWwwAuthenticateParams
+	MCPPromptsListChangedData                                      = rpc.MCPPromptsListChangedData
+	MCPResourcesListChangedData                                    = rpc.MCPResourcesListChangedData
 	MCPServersLoadedServer                                         = rpc.MCPServersLoadedServer
 	MCPServerSource                                                = rpc.MCPServerSource
 	MCPServerStatus                                                = rpc.MCPServerStatus
 	MCPServerTransport                                             = rpc.MCPServerTransport
+	MCPToolsListChangedData                                        = rpc.MCPToolsListChangedData
 	ModelCallFailureBadRequestKind                                 = rpc.ModelCallFailureBadRequestKind
 	ModelCallFailureData                                           = rpc.ModelCallFailureData
 	ModelCallFailureRequestFingerprint                             = rpc.ModelCallFailureRequestFingerprint
@@ -198,6 +206,7 @@ type (
 	ReasoningSummary                                               = rpc.ReasoningSummary
 	SamplingCompletedData                                          = rpc.SamplingCompletedData
 	SamplingRequestedData                                          = rpc.SamplingRequestedData
+	SessionAutoModeResolvedData                                    = rpc.SessionAutoModeResolvedData
 	SessionAutopilotObjectiveChangedData                           = rpc.SessionAutopilotObjectiveChangedData
 	SessionBackgroundTasksChangedData                              = rpc.SessionBackgroundTasksChangedData
 	SessionBinaryAssetData                                         = rpc.SessionBinaryAssetData
@@ -226,6 +235,7 @@ type (
 	SessionLimitsExhaustedRequestedData                            = rpc.SessionLimitsExhaustedRequestedData
 	SessionLimitsExhaustedResponse                                 = rpc.SessionLimitsExhaustedResponse
 	SessionLimitsExhaustedResponseAction                           = rpc.SessionLimitsExhaustedResponseAction
+	SessionManagedSettingsResolvedData                             = rpc.SessionManagedSettingsResolvedData
 	SessionMCPServersLoadedData                                    = rpc.SessionMCPServersLoadedData
 	SessionMCPServerStatusChangedData                              = rpc.SessionMCPServerStatusChangedData
 	SessionMode                                                    = rpc.SessionMode
@@ -372,6 +382,9 @@ const (
 	AutoApprovalRecommendationError                                    = rpc.AutoApprovalRecommendationError
 	AutoApprovalRecommendationExcluded                                 = rpc.AutoApprovalRecommendationExcluded
 	AutoApprovalRecommendationRequireApproval                          = rpc.AutoApprovalRecommendationRequireApproval
+	AutoModeResolvedReasoningBucketHigh                                = rpc.AutoModeResolvedReasoningBucketHigh
+	AutoModeResolvedReasoningBucketLow                                 = rpc.AutoModeResolvedReasoningBucketLow
+	AutoModeResolvedReasoningBucketMedium                              = rpc.AutoModeResolvedReasoningBucketMedium
 	AutoModeSwitchResponseNo                                           = rpc.AutoModeSwitchResponseNo
 	AutoModeSwitchResponseYes                                          = rpc.AutoModeSwitchResponseYes
 	AutoModeSwitchResponseYesAlways                                    = rpc.AutoModeSwitchResponseYesAlways
@@ -414,6 +427,9 @@ const (
 	ExtensionsLoadedExtensionStatusStarting                            = rpc.ExtensionsLoadedExtensionStatusStarting
 	HandoffSourceTypeLocal                                             = rpc.HandoffSourceTypeLocal
 	HandoffSourceTypeRemote                                            = rpc.HandoffSourceTypeRemote
+	ManagedSettingsResolvedSourceDevice                                = rpc.ManagedSettingsResolvedSourceDevice
+	ManagedSettingsResolvedSourceNone                                  = rpc.ManagedSettingsResolvedSourceNone
+	ManagedSettingsResolvedSourceServer                                = rpc.ManagedSettingsResolvedSourceServer
 	MCPHeadersRefreshCompletedOutcomeHeaders                           = rpc.MCPHeadersRefreshCompletedOutcomeHeaders
 	MCPHeadersRefreshCompletedOutcomeNone                              = rpc.MCPHeadersRefreshCompletedOutcomeNone
 	MCPHeadersRefreshCompletedOutcomeTimeout                           = rpc.MCPHeadersRefreshCompletedOutcomeTimeout
@@ -508,6 +524,7 @@ const (
 	SessionEventTypeAssistantMessageStart                              = rpc.SessionEventTypeAssistantMessageStart
 	SessionEventTypeAssistantReasoning                                 = rpc.SessionEventTypeAssistantReasoning
 	SessionEventTypeAssistantReasoningDelta                            = rpc.SessionEventTypeAssistantReasoningDelta
+	SessionEventTypeAssistantServerToolProgress                        = rpc.SessionEventTypeAssistantServerToolProgress
 	SessionEventTypeAssistantStreamingDelta                            = rpc.SessionEventTypeAssistantStreamingDelta
 	SessionEventTypeAssistantToolCallDelta                             = rpc.SessionEventTypeAssistantToolCallDelta
 	SessionEventTypeAssistantTurnEnd                                   = rpc.SessionEventTypeAssistantTurnEnd
@@ -534,12 +551,16 @@ const (
 	SessionEventTypeMCPHeadersRefreshRequired                          = rpc.SessionEventTypeMCPHeadersRefreshRequired
 	SessionEventTypeMCPOauthCompleted                                  = rpc.SessionEventTypeMCPOauthCompleted
 	SessionEventTypeMCPOauthRequired                                   = rpc.SessionEventTypeMCPOauthRequired
+	SessionEventTypeMCPPromptsListChanged                              = rpc.SessionEventTypeMCPPromptsListChanged
+	SessionEventTypeMCPResourcesListChanged                            = rpc.SessionEventTypeMCPResourcesListChanged
+	SessionEventTypeMCPToolsListChanged                                = rpc.SessionEventTypeMCPToolsListChanged
 	SessionEventTypeModelCallFailure                                   = rpc.SessionEventTypeModelCallFailure
 	SessionEventTypePendingMessagesModified                            = rpc.SessionEventTypePendingMessagesModified
 	SessionEventTypePermissionCompleted                                = rpc.SessionEventTypePermissionCompleted
 	SessionEventTypePermissionRequested                                = rpc.SessionEventTypePermissionRequested
 	SessionEventTypeSamplingCompleted                                  = rpc.SessionEventTypeSamplingCompleted
 	SessionEventTypeSamplingRequested                                  = rpc.SessionEventTypeSamplingRequested
+	SessionEventTypeSessionAutoModeResolved                            = rpc.SessionEventTypeSessionAutoModeResolved
 	SessionEventTypeSessionAutopilotObjectiveChanged                   = rpc.SessionEventTypeSessionAutopilotObjectiveChanged
 	SessionEventTypeSessionBackgroundTasksChanged                      = rpc.SessionEventTypeSessionBackgroundTasksChanged
 	SessionEventTypeSessionBinaryAsset                                 = rpc.SessionEventTypeSessionBinaryAsset
@@ -562,6 +583,7 @@ const (
 	SessionEventTypeSessionInfo                                        = rpc.SessionEventTypeSessionInfo
 	SessionEventTypeSessionLimitsExhaustedCompleted                    = rpc.SessionEventTypeSessionLimitsExhaustedCompleted
 	SessionEventTypeSessionLimitsExhaustedRequested                    = rpc.SessionEventTypeSessionLimitsExhaustedRequested
+	SessionEventTypeSessionManagedSettingsResolved                     = rpc.SessionEventTypeSessionManagedSettingsResolved
 	SessionEventTypeSessionMCPServersLoaded                            = rpc.SessionEventTypeSessionMCPServersLoaded
 	SessionEventTypeSessionMCPServerStatusChanged                      = rpc.SessionEventTypeSessionMCPServerStatusChanged
 	SessionEventTypeSessionModeChanged                                 = rpc.SessionEventTypeSessionModeChanged

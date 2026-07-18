@@ -698,6 +698,12 @@ public sealed class ToolResultObject
     public IDictionary<string, object>? ToolTelemetry { get; set; }
 
     /// <summary>
+    /// Names of tools returned by a tool-search tool.
+    /// </summary>
+    [JsonPropertyName("toolReferences")]
+    public IList<string>? ToolReferences { get; set; }
+
+    /// <summary>
     /// Converts the result of an <see cref="AIFunction"/> invocation into a
     /// <see cref="ToolResultObject"/>. Handles <see cref="ToolResultAIContent"/>,
     /// <see cref="AIContent"/>, and falls back to JSON serialization.
@@ -808,6 +814,14 @@ public sealed class ToolInvocation
     /// Arguments passed to the tool by the language model.
     /// </summary>
     public JsonElement? Arguments { get; set; }
+    /// <summary>
+    /// Snapshot of the session's currently initialized tools. The SDK populates
+    /// this only when the invocation targets the built-in tool-search tool
+    /// (<c>tool_search_tool</c>), so a tool-search override can rank/filter the
+    /// live catalog — including MCP tools configured in settings — without
+    /// issuing its own RPC. <c>null</c> for every other tool invocation.
+    /// </summary>
+    public IList<CurrentToolMetadata>? AvailableTools { get; set; }
 }
 
 /// <summary>
@@ -2643,6 +2657,14 @@ public sealed class CustomAgentConfig
     /// </summary>
     [JsonPropertyName("model")]
     public string? Model { get; set; }
+
+    /// <summary>
+    /// Reasoning effort level for this agent's model.
+    /// When omitted, no per-agent override is sent and the backend chooses its
+    /// default. The parent session effort is not inherited.
+    /// </summary>
+    [JsonPropertyName("reasoningEffort")]
+    public string? ReasoningEffort { get; set; }
 }
 
 /// <summary>
@@ -2719,6 +2741,30 @@ public sealed class LargeToolOutputConfig
     /// <remarks>The default value is the OS temp directory.</remarks>
     [JsonPropertyName("outputDir")]
     public string? OutputDirectory { get; set; }
+}
+
+/// <summary>
+/// Overrides the runtime's built-in tool-search behavior.
+/// Defers tools to keep the model's active tool set small.
+/// To override the tool-search tool's implementation, register a tool
+/// named "tool_search_tool" with <c>OverridesBuiltInTool</c> set to
+/// <see langword="true"/>.
+/// </summary>
+public sealed class ToolSearchConfig
+{
+    /// <summary>
+    /// Enable or disable tool search.
+    /// </summary>
+    [JsonPropertyName("enabled")]
+    public bool? Enabled { get; set; }
+
+    /// <summary>
+    /// The tool count above which MCP and external tools are deferred behind
+    /// tool search. When <see langword="null"/>, the runtime default (30)
+    /// applies.
+    /// </summary>
+    [JsonPropertyName("deferThreshold")]
+    public int? DeferThreshold { get; set; }
 }
 
 /// <summary>
@@ -2829,6 +2875,7 @@ public abstract class SessionConfigBase
         Hooks = other.Hooks;
         InfiniteSessions = other.InfiniteSessions;
         LargeOutput = other.LargeOutput;
+        ToolSearch = other.ToolSearch;
         Memory = other.Memory;
         McpServers = other.McpServers is not null
             ? (other.McpServers is Dictionary<string, McpServerConfig> dict
@@ -2868,6 +2915,7 @@ public abstract class SessionConfigBase
         RequestExtensions = other.RequestExtensions;
         ExtensionSdkPath = other.ExtensionSdkPath;
         ExtensionInfo = other.ExtensionInfo;
+        CanvasProvider = other.CanvasProvider;
         CanvasHandler = other.CanvasHandler;
 #pragma warning restore GHCP001
         SkillDirectories = other.SkillDirectories is not null ? [.. other.SkillDirectories] : null;
@@ -3235,6 +3283,13 @@ public abstract class SessionConfigBase
     public LargeToolOutputConfig? LargeOutput { get; set; }
 
     /// <summary>
+    /// Overrides the runtime's built-in tool-search behavior.
+    /// Tool search defers tools to keep the model's active tool set small. When <see langword="null"/>,
+    /// the runtime default applies.
+    /// </summary>
+    public ToolSearchConfig? ToolSearch { get; set; }
+
+    /// <summary>
     /// Configuration for session memory. When set, controls whether the
     /// session can read and write persistent memory.
     /// </summary>
@@ -3336,6 +3391,16 @@ public abstract class SessionConfigBase
     /// </summary>
     [Experimental(Diagnostics.Experimental)]
     public ExtensionInfo? ExtensionInfo { get; set; }
+
+    /// <summary>
+    /// Stable identity for a host/SDK connection that supplies built-in
+    /// canvases. When set, the runtime uses <see cref="CanvasProviderIdentity.Id"/>
+    /// verbatim as the agent-facing canvas extension id, so canvases declared on
+    /// a control connection survive reconnect and CLI restart. Honored on
+    /// session create and resume.
+    /// </summary>
+    [Experimental(Diagnostics.Experimental)]
+    public CanvasProviderIdentity? CanvasProvider { get; set; }
 
     /// <summary>
     /// Provider-side canvas lifecycle handler. The SDK routes inbound
@@ -4021,5 +4086,6 @@ public sealed class SystemMessageTransformRpcResponse
 [JsonSerializable(typeof(CanvasProviderOpenResult))]
 [JsonSerializable(typeof(CanvasHostContext))]
 [JsonSerializable(typeof(ExtensionInfo))]
+[JsonSerializable(typeof(CanvasProviderIdentity))]
 #pragma warning restore GHCP001
 internal partial class TypesJsonContext : JsonSerializerContext;

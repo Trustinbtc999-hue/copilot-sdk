@@ -6,7 +6,7 @@ use github_copilot_sdk::rpc::{OpenCanvasInstance, RemoteSessionMode};
 use github_copilot_sdk::session_events::{ReasoningSummary, SessionLimitsConfig};
 use github_copilot_sdk::{
     CliProgram, Client, ClientOptions, ExtensionInfo, ProviderConfig, ResumeSessionConfig,
-    SessionConfig, SessionId,
+    SessionConfig, SessionId, Transport,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -236,6 +236,7 @@ async fn should_forward_advanced_session_resume_options_to_the_cli() {
                     canvas_id: "resume-canvas".to_string(),
                     extension_id: "github-app/rust-e2e-extension".to_string(),
                     extension_name: None,
+                    icon: None,
                     input: Some(json!({ "value": "from-resume" })),
                     instance_id: "resume-instance".to_string(),
                     status: None,
@@ -347,6 +348,7 @@ impl FakeCli {
             ])
             .with_github_token(token)
             .with_use_logged_in_user(false)
+            .with_transport(Transport::Stdio)
     }
 
     fn path(&self, name: &str) -> PathBuf {

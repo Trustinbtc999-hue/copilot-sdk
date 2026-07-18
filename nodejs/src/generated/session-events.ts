@@ -40,6 +40,7 @@ export type SessionEvent =
   | PendingMessagesModifiedEvent
   | AssistantTurnStartEvent
   | AssistantIntentEvent
+  | AssistantServerToolProgressEvent
   | AssistantReasoningEvent
   | AssistantReasoningDeltaEvent
   | AssistantToolCallDeltaEvent
@@ -91,6 +92,8 @@ export type SessionEvent =
   | AutoModeSwitchCompletedEvent
   | SessionLimitsExhaustedRequestedEvent
   | SessionLimitsExhaustedCompletedEvent
+  | AutoModeResolvedEvent
+  | ManagedSettingsResolvedEvent
   | CommandsChangedEvent
   | CapabilitiesChangedEvent
   | ExitPlanModeRequestedEvent
@@ -101,6 +104,9 @@ export type SessionEvent =
   | CustomAgentsUpdatedEvent
   | McpServersLoadedEvent
   | McpServerStatusChangedEvent
+  | McpToolsListChangedEvent
+  | McpResourcesListChangedEvent
+  | McpPromptsListChangedEvent
   | ExtensionsLoadedEvent
   | CanvasOpenedEvent
   | CanvasRegistryChangedEvent
@@ -631,6 +637,26 @@ export type SessionLimitsExhaustedResponseAction =
   | "unset"
   /** Leave the limit unchanged and cancel the blocked model request. */
   | "cancel";
+/**
+ * Coarse request-difficulty bucket for UX explainability
+ */
+export type AutoModeResolvedReasoningBucket =
+  /** The request looks low-reasoning; a lighter model is appropriate. */
+  | "low"
+  /** The request needs a moderate amount of reasoning. */
+  | "medium"
+  /** The request looks high-reasoning; a stronger model is appropriate. */
+  | "high";
+/**
+ * Which channel supplied the effective enterprise managed settings (highest-authority present layer wins wholesale)
+ */
+export type ManagedSettingsResolvedSource =
+  /** Account/org policy self-fetched from the GitHub managed-settings endpoint (higher authority). */
+  | "server"
+  /** Device-level MDM policy discovered from plist/registry/file (lower authority). */
+  | "device"
+  /** No managed policy is in force (no layer contributed). */
+  | "none";
 /**
  * Exit plan mode action
  */
@@ -3137,6 +3163,53 @@ export interface AssistantIntentData {
   intent: string;
 }
 /**
+ * Session event "assistant.server_tool_progress". Live progress signal for a provider-hosted server tool (e.g. hosted web search) while it runs, before the finalized serverTools envelope lands on the terminal assistant.message
+ */
+export interface AssistantServerToolProgressEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: AssistantServerToolProgressData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "assistant.server_tool_progress".
+   */
+  type: "assistant.server_tool_progress";
+}
+/**
+ * Live progress signal for a provider-hosted server tool (e.g. hosted web search) while it runs, before the finalized serverTools envelope lands on the terminal assistant.message
+ */
+export interface AssistantServerToolProgressData {
+  /**
+   * Kind of hosted server tool that is running. Only `web_search` is emitted today.
+   */
+  kind: string;
+  /**
+   * Position of the hosted tool call in the response output. Stable across the call's lifecycle events (unlike the provider's per-event item id, which CAPI rotates), so the host keys the live in-progress row on it.
+   */
+  outputIndex: number;
+  /**
+   * Lifecycle status of the hosted call: `in_progress`, `searching`, or `completed`.
+   */
+  status: string;
+}
+/**
  * Session event "assistant.reasoning". Assistant reasoning content for timeline display with complete thinking text
  */
 export interface AssistantReasoningEvent {
@@ -3353,6 +3426,10 @@ export interface AssistantMessageData {
    * @experimental
    */
   citations?: Citations;
+  /**
+   * Client-minted request id (x-request-id header) echoed by the server. Distinct from requestId (x-github-request-id) and serviceRequestId (x-copilot-service-request-id).
+   */
+  clientRequestId?: string;
   /**
    * The assistant's text response content
    */
@@ -4452,6 +4529,14 @@ export interface ToolExecutionCompleteData {
    */
   isUserRequested?: boolean;
   /**
+   * FIDES IFC label projected from tool ingress metadata (MCP `CallToolResult._meta` or synthesized built-in ingress labels). Persisted as `{ ifc: ... }` so the label survives session resume, including model-visible failure results. Experimental.
+   *
+   * @experimental
+   */
+  mcpMeta?: {
+    [k: string]: unknown | undefined;
+  };
+  /**
    * Model identifier that generated this tool call
    */
   model?: string;
@@ -4526,6 +4611,14 @@ export interface ToolExecutionCompleteResult {
    * Full detailed tool result for UI/timeline display, preserving complete content such as diffs. Falls back to content when absent.
    */
   detailedContent?: string;
+  /**
+   * FIDES IFC label projected from tool ingress metadata (MCP `CallToolResult._meta` or synthesized built-in ingress labels) — persisted as `{ ifc: ... }` (only the `ifc` key, not the whole `_meta`). Persisted so the FIDES IFC label survives session resume: the engine rehydrates accumulated taint by replaying these on load. Populated for ingress sources when FIDES IFC is on. Experimental.
+   *
+   * @experimental
+   */
+  mcpMeta?: {
+    [k: string]: unknown | undefined;
+  };
   /**
    * Structured content (arbitrary JSON) returned verbatim by the MCP tool
    */
@@ -7113,6 +7206,7 @@ export interface McpOauthRequiredEvent {
  * OAuth authentication request for an MCP server
  */
 export interface McpOauthRequiredData {
+  httpResponse?: McpOauthHttpResponse;
   reason: McpOauthRequestReason;
   /**
    * Unique identifier for this OAuth request; used to respond via session.mcp.oauth.handlePendingRequest
@@ -7132,6 +7226,36 @@ export interface McpOauthRequiredData {
   serverUrl: string;
   staticClientConfig?: McpOauthRequiredStaticClientConfig;
   wwwAuthenticateParams?: McpOauthWWWAuthenticateParams;
+}
+/**
+ * Raw HTTP response details from the OAuth auth challenge, as observed by the runtime.
+ */
+export interface McpOauthHttpResponse {
+  /**
+   * Complete UTF-8 response body for host-specific challenge handling, including an empty string for an empty body. Omitted when the complete body is not valid UTF-8; body read failures fail the HTTP operation rather than exposing a partial response.
+   */
+  body?: string;
+  /**
+   * HTTP response headers as observed by the runtime. Order and casing are transport-dependent, and duplicate header names may appear multiple times.
+   */
+  headers: HeaderEntry[];
+  /**
+   * HTTP status code returned with the auth challenge.
+   */
+  statusCode: number;
+}
+/**
+ * Single HTTP header entry as a name/value pair.
+ */
+export interface HeaderEntry {
+  /**
+   * HTTP response header name as observed by the runtime.
+   */
+  name: string;
+  /**
+   * HTTP response header value as observed by the runtime.
+   */
+  value: string;
 }
 /**
  * Static OAuth client configuration, if the server specifies one
@@ -7790,6 +7914,130 @@ export interface SessionLimitsExhaustedResponse {
   maxAiCredits?: number;
 }
 /**
+ * Session event "session.auto_mode_resolved". Auto Intent resolution: the concrete model the session settled on for the first prompt of an auto-mode session, and why. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.
+ */
+/** @experimental */
+export interface AutoModeResolvedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: AutoModeResolvedData;
+  /**
+   * When true, the event is transient and not persisted to the session event log on disk
+   */
+  ephemeral?: boolean;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.auto_mode_resolved".
+   */
+  type: "session.auto_mode_resolved";
+}
+/**
+ * Auto Intent resolution: the concrete model the session settled on for the first prompt of an auto-mode session, and why. Lets SDK clients render the chosen model and the full reason it was picked. The core selection fields (chosenModel/reasoningBucket/categoryScores) are stable; the routing-analytics fields (predictedLabel/confidence/candidateModels) mirror the upstream intent service and may evolve, hence the event's experimental stability.
+ */
+/** @experimental */
+export interface AutoModeResolvedData {
+  /**
+   * Ordered candidate model list the router returned, when not a fallback
+   */
+  candidateModels?: string[];
+  /**
+   * Per-category classifier scores (0-1) behind the bucket: the granular HYDRA capability scores (reasoning, code_gen, debugging, tool_use), or the binary needs_reasoning/no_reasoning scores when HYDRA didn't run. Lets clients show a breakdown rather than just the bucket.
+   */
+  categoryScores?: {
+    [k: string]: number | undefined;
+  };
+  /**
+   * The concrete model the session will use after any intent refinement
+   */
+  chosenModel: string;
+  /**
+   * Classifier confidence for the predicted label, when available
+   */
+  confidence?: number;
+  /**
+   * The predicted classifier label (e.g. `needs_reasoning`), when available
+   */
+  predictedLabel?: string;
+  reasoningBucket?: AutoModeResolvedReasoningBucket;
+}
+/**
+ * Session event "session.managed_settings_resolved". Enterprise managed-settings resolution: the effective managed settings the session applied and where they came from, so SDK clients can show users what is enterprise-managed and by which authority. Fires whenever managed policy is (re)applied — at session start, on resume, and on account switch. This is an ephemeral live snapshot (delivered to subscribers but not persisted to the session event log), because at session start it resolves before `session.start` is emitted; for a session-independent pull, use the SDK `getManagedSettings()` API, which returns the identical payload. Managed settings have a single authoritative source, so the highest-authority present layer (server > device) wins wholesale; `bypassPermissionsDisabled` is deny-wins across layers. Marked experimental while the managed-settings surface stabilizes.
+ */
+/** @experimental */
+export interface ManagedSettingsResolvedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: ManagedSettingsResolvedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "session.managed_settings_resolved".
+   */
+  type: "session.managed_settings_resolved";
+}
+/**
+ * Enterprise managed-settings resolution: the effective managed settings the session applied and where they came from, so SDK clients can show users what is enterprise-managed and by which authority. Fires whenever managed policy is (re)applied — at session start, on resume, and on account switch. This is an ephemeral live snapshot (delivered to subscribers but not persisted to the session event log), because at session start it resolves before `session.start` is emitted; for a session-independent pull, use the SDK `getManagedSettings()` API, which returns the identical payload. Managed settings have a single authoritative source, so the highest-authority present layer (server > device) wins wholesale; `bypassPermissionsDisabled` is deny-wins across layers. Marked experimental while the managed-settings surface stabilizes.
+ */
+/** @experimental */
+export interface ManagedSettingsResolvedData {
+  /**
+   * Whether enterprise policy disables bypass-permissions ("yolo") mode for this session. Deny-wins across layers, and forced on when `failClosed` is true.
+   */
+  bypassPermissionsDisabled: boolean;
+  /**
+   * Whether the device (MDM/plist/registry/file) managed-settings layer was present
+   */
+  deviceManaged: boolean;
+  /**
+   * Whether managed policy could not be determined (e.g. a failed server fetch) and the session fell back to the fail-closed restriction. When true, restrictions such as disabling bypass-permissions are enforced even though `settings` may be absent.
+   */
+  failClosed: boolean;
+  /**
+   * The setting keys under enterprise management in the effective managed settings (e.g. `model`, `enabledPlugins`, `permissions`). Empty when no managed settings are in force.
+   */
+  managedKeys: string[];
+  /**
+   * Whether the server (account/org) managed-settings layer was present
+   */
+  serverManaged: boolean;
+  /**
+   * The effective (resolved) managed settings values, so clients can render exactly what is enforced. Absent when no managed policy is in force.
+   */
+  settings?: {
+    [k: string]: unknown | undefined;
+  };
+  source: ManagedSettingsResolvedSource;
+}
+/**
  * Session event "commands.changed". SDK command registration change notification
  */
 export interface CommandsChangedEvent {
@@ -8332,6 +8580,105 @@ export interface McpServerStatusChangedData {
   status: McpServerStatus;
 }
 /**
+ * Session event "mcp.tools.list_changed". Payload identifying the MCP server associated with a list change.
+ */
+export interface McpToolsListChangedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: McpListChangedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "mcp.tools.list_changed".
+   */
+  type: "mcp.tools.list_changed";
+}
+/**
+ * Payload identifying the MCP server associated with a list change.
+ */
+export interface McpListChangedData {
+  /**
+   * Name of the MCP server whose list changed
+   */
+  serverName: string;
+}
+/**
+ * Session event "mcp.resources.list_changed". Payload identifying the MCP server associated with a list change.
+ */
+export interface McpResourcesListChangedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: McpListChangedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "mcp.resources.list_changed".
+   */
+  type: "mcp.resources.list_changed";
+}
+/**
+ * Session event "mcp.prompts.list_changed". Payload identifying the MCP server associated with a list change.
+ */
+export interface McpPromptsListChangedEvent {
+  /**
+   * Sub-agent instance identifier. Absent for events from the root/main agent and session-level events.
+   */
+  agentId?: string;
+  data: McpListChangedData;
+  /**
+   * Always true for events that are transient and not persisted to the session event log on disk.
+   */
+  ephemeral: true;
+  /**
+   * Unique event identifier (UUID v4), generated when the event is emitted
+   */
+  id: string;
+  /**
+   * ID of the chronologically preceding event in the session, forming a linked chain. Null for the first event.
+   */
+  parentId: string | null;
+  /**
+   * ISO 8601 timestamp when the event was created
+   */
+  timestamp: string;
+  /**
+   * Type discriminator. Always "mcp.prompts.list_changed".
+   */
+  type: "mcp.prompts.list_changed";
+}
+/**
  * Session event "session.extensions_loaded". Payload of `session.extensions_loaded` listing discovered extensions and their statuses.
  */
 export interface ExtensionsLoadedEvent {
@@ -8386,7 +8733,7 @@ export interface ExtensionsLoadedExtension {
   status: ExtensionsLoadedExtensionStatus;
 }
 /**
- * Session event "session.canvas.opened". Payload of `session.canvas.opened` with canvas instance and provider IDs plus optional title, status, URL, and input.
+ * Session event "session.canvas.opened". Payload of `session.canvas.opened` with canvas instance and provider IDs plus optional icon, title, status, URL, and input.
  */
 /** @experimental */
 export interface CanvasOpenedEvent {
@@ -8417,7 +8764,7 @@ export interface CanvasOpenedEvent {
   type: "session.canvas.opened";
 }
 /**
- * Payload of `session.canvas.opened` with canvas instance and provider IDs plus optional title, status, URL, and input.
+ * Payload of `session.canvas.opened` with canvas instance and provider IDs plus optional icon, title, status, URL, and input.
  */
 /** @experimental */
 export interface CanvasOpenedData {
@@ -8433,6 +8780,10 @@ export interface CanvasOpenedData {
    * Owning extension display name, when available
    */
   extensionName?: string;
+  /**
+   * Host-local PNG path for the canvas icon, when supplied
+   */
+  icon?: string;
   /**
    * Input supplied when the instance was opened
    */
@@ -8526,6 +8877,10 @@ export interface CanvasRegistryChangedCanvas {
    * Owning extension display name, when available
    */
   extensionName?: string;
+  /**
+   * Host-local PNG path for the canvas icon, when supplied
+   */
+  icon?: string;
   /**
    * JSON Schema for canvas open input
    */
