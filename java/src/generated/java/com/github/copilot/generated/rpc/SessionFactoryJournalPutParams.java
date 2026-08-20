@@ -14,7 +14,7 @@ import com.github.copilot.CopilotExperimental;
 import javax.annotation.processing.Generated;
 
 /**
- * Identifies the target session.
+ * Parameters for storing a factory journal entry.
  *
  * @apiNote This method is experimental and may change in a future version.
  * @since 1.0.0
@@ -23,8 +23,16 @@ import javax.annotation.processing.Generated;
 @javax.annotation.processing.Generated("copilot-sdk-codegen")
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @JsonIgnoreProperties(ignoreUnknown = true)
-public record SessionAgentListParams(
+public record SessionFactoryJournalPutParams(
     /** Target session identifier */
-    @JsonProperty("sessionId") String sessionId
+    @JsonProperty("sessionId") String sessionId,
+    /** Factory run identifier. */
+    @JsonProperty("runId") String runId,
+    /** Opaque token identifying the current factory execution attempt. */
+    @JsonProperty("executionToken") String executionToken,
+    /** Namespaced journal key. */
+    @JsonProperty("key") String key,
+    /** JSON result to memoize. */
+    @JsonProperty("resultJson") Object resultJson
 ) {
 }
